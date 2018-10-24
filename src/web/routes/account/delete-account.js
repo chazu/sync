@@ -1,9 +1,18 @@
 import { sendPug } from '../../pug';
 import Config from '../../../config';
+import { eventlog } from '../../../logger';
 
 const LOGGER = require('@calzoneman/jsli')('web/routes/account/delete-account');
 
-export default function initialize(app, authorize, csrfVerify, channelDb, userDb) {
+export default function initialize(
+    app,
+    authorize,
+    csrfVerify,
+    channelDb,
+    userDb,
+    emailConfig,
+    emailController
+) {
     function showDeletePage(res, flags) {
         let locals = Object.assign({ channelCount: 0 }, flags);
 
@@ -55,9 +64,37 @@ export default function initialize(app, authorize, csrfVerify, channelDb, userDb
 
         try {
             await userDb.requestAccountDeletion(user.id);
+            eventlog.log(`[account] ${req.ip} requested account deletion for ${user.name}`);
         } catch (error) {
             LOGGER.error('Unknown error in requestAccountDeletion: %s', error.stack);
             showDeletePage(res, { internalError: true });
+        }
+
+        if (emailConfig.getDeleteAccount().isEnabled() && user.email) {
+            LOGGER.info(
+                'Sending email notification for account deletion %s <%s>',
+                user.name,
+                user.email
+            );
+
+            try {
+                await emailController.sendAccountDeletion({
+                    username: user.name,
+                    address: user.email
+                });
+            } catch (error) {
+                LOGGER.error(
+                    'Sending email notification failed for %s <%s>: %s',
+                    user.name,
+                    user.email,
+                    error.stack
+                )
+            }
+        } else {
+            LOGGER.warn(
+                'Skipping account deletion email notification for %s',
+                user.name
+            );
         }
 
         res.clearCookie('auth', { domain: Config.get('http.root-domain-dotted') });

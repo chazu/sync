@@ -208,7 +208,9 @@ module.exports = {
             req => module.exports.authorize(req),
             csrf.verify,
             require('../database/channels'),
-            require('../database/accounts')
+            require('../database/accounts'),
+            emailConfig,
+            emailController
         );
 
         require('./acp').init(app, ioConfig);
