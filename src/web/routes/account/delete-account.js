@@ -52,7 +52,6 @@ export default function initialize(
 
         try {
             let channels = await channelDb.listUserChannelsAsync(user.name);
-            let channelCount = channels.length;
             if (channels.length > 0) {
                 showDeletePage(res, { channelCount: channels.length });
                 return;
@@ -88,7 +87,7 @@ export default function initialize(
                     user.name,
                     user.email,
                     error.stack
-                )
+                );
             }
         } else {
             LOGGER.warn(
