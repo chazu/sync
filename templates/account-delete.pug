@@ -8,6 +8,15 @@ block content
         | Your account deletion request could not be processed due to an internal
         | error.  Please try again later and ask an administrator for assistance
         | if the problem persists.
+    else if !loggedIn
+      h2 Authentication Required
+      p
+        | You must&nbsp;
+        a(href="/login") log in
+        | &nbsp; before requesting deletion of your account.
+    else if authFailed
+      h2 Authentication failed
+      p= reason
     else if channelCount > 0
       h2 Delete Account
       p
@@ -26,14 +35,6 @@ block content
         | Please confirm your username and password to continue.
       form(action="/account/delete", method="post")
         input(type="hidden", name="_csrf", value=csrfToken)
-        .form-group(class=noSuchUser ? "has-error" : "")
-          label.control-label(for="username") Username
-          input#username.form-control(type="text", name="username")
-          if noSuchUser
-            p.text-danger
-              | No such user "
-              = noSuchUser
-              | "
         .form-group(class=wrongPassword ? "has-error" : "")
           label.control-label(for="password") Password
           input#password.form-control(type="password", name="password")

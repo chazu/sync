@@ -132,7 +132,7 @@ export async function initTables() {
 
     await ensureTable('user_deletion_requests', t => {
         t.increments('request_id').notNullable().primary();
-        t.integer('user_id').notNullable()
+        t.unsigned('user_id').notNullable()
             .references('id').inTable('users')
             .onDelete('cascade')
             .unique();

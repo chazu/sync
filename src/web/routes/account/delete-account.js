@@ -1,51 +1,56 @@
 import { sendPug } from '../../pug';
 import Config from '../../../config';
 import { eventlog } from '../../../logger';
+const verifySessionAsync = require('bluebird').promisify(
+    require('../../../session').verifySession
+);
 
 const LOGGER = require('@calzoneman/jsli')('web/routes/account/delete-account');
 
 export default function initialize(
     app,
-    authorize,
     csrfVerify,
     channelDb,
     userDb,
     emailConfig,
     emailController
 ) {
-    function showDeletePage(res, flags) {
-        let locals = Object.assign({ channelCount: 0 }, flags);
-
-        sendPug(
-            res,
-            'account-delete',
-            locals
-        );
-    }
-
     app.get('/account/delete', async (req, res) => {
+        if (!await authorize(req, res)) {
+            return;
+        }
+
         await showDeletePage(res, {});
     });
 
     app.post('/account/delete', async (req, res) => {
+        if (!await authorize(req, res)) {
+            return;
+        }
+
         csrfVerify(req);
 
         if (!req.body.confirmed) {
-            showDeletePage(res, { missingConfirmation: true });
+            await showDeletePage(res, { missingConfirmation: true });
             return;
         }
 
         let user;
         try {
-            user = await userDb.verifyLoginAsync(req.body.username, req.body.password);
+            user = await userDb.verifyLoginAsync(res.locals.loginName, req.body.password);
         } catch (error) {
-            if (error.message === 'User does not exist' || error.message.match(/Invalid username/)) {
-                showDeletePage(res, { noSuchUser: req.body.username });
-            } else if (error.message === 'Invalid username/password combination') {
-                showDeletePage(res, { wrongPassword: true });
+            if (error.message === 'Invalid username/password combination') {
+                res.status(403);
+                await showDeletePage(res, { wrongPassword: true });
+            } else if (error.message === 'User does not exist' ||
+                       error.message.match(/Invalid username/)) {
+                LOGGER.error('User does not exist after authorization');
+                res.status(503);
+                await showDeletePage(res, { internalError: true });
             } else {
+                res.status(503);
                 LOGGER.error('Unknown error in verifyLogin: %s', error.stack);
-                showDeletePage(res, { internalError: true });
+                await showDeletePage(res, { internalError: true });
             }
             return;
         }
@@ -53,12 +58,12 @@ export default function initialize(
         try {
             let channels = await channelDb.listUserChannelsAsync(user.name);
             if (channels.length > 0) {
-                showDeletePage(res, { channelCount: channels.length });
+                await showDeletePage(res, { channelCount: channels.length });
                 return;
             }
         } catch (error) {
             LOGGER.error('Unknown error in listUserChannels: %s', error.stack);
-            showDeletePage(res, { internalError: true });
+            await showDeletePage(res, { internalError: true });
         }
 
         try {
@@ -66,29 +71,11 @@ export default function initialize(
             eventlog.log(`[account] ${req.ip} requested account deletion for ${user.name}`);
         } catch (error) {
             LOGGER.error('Unknown error in requestAccountDeletion: %s', error.stack);
-            showDeletePage(res, { internalError: true });
+            await showDeletePage(res, { internalError: true });
         }
 
         if (emailConfig.getDeleteAccount().isEnabled() && user.email) {
-            LOGGER.info(
-                'Sending email notification for account deletion %s <%s>',
-                user.name,
-                user.email
-            );
-
-            try {
-                await emailController.sendAccountDeletion({
-                    username: user.name,
-                    address: user.email
-                });
-            } catch (error) {
-                LOGGER.error(
-                    'Sending email notification failed for %s <%s>: %s',
-                    user.name,
-                    user.email,
-                    error.stack
-                );
-            }
+            await sendEmail(user);
         } else {
             LOGGER.warn(
                 'Skipping account deletion email notification for %s',
@@ -105,4 +92,70 @@ export default function initialize(
             {}
         );
     });
+
+    async function showDeletePage(res, flags) {
+        let locals = Object.assign({ channelCount: 0 }, flags);
+
+        if (res.locals.loggedIn) {
+            let channels = await channelDb.listUserChannelsAsync(
+                res.locals.loginName
+            );
+            locals.channelCount = channels.length;
+        } else {
+            res.status(401);
+        }
+
+        sendPug(
+            res,
+            'account-delete',
+            locals
+        );
+    }
+
+    async function authorize(req, res) {
+        try {
+            if (!res.locals.loggedIn) {
+                res.status(401);
+                await showDeletePage(res, {});
+                return;
+            }
+
+            if (!req.signedCookies || !req.signedCookies.auth) {
+                throw new Error('Missing auth cookie');
+            }
+
+            await verifySessionAsync(req.signedCookies.auth);
+            return true;
+        } catch (error) {
+            res.status(401);
+            sendPug(
+                res,
+                'account-delete',
+                { authFailed: true, reason: error.message }
+            );
+            return false;
+        }
+    }
+
+    async function sendEmail(user) {
+        LOGGER.info(
+            'Sending email notification for account deletion %s <%s>',
+            user.name,
+            user.email
+        );
+
+        try {
+            await emailController.sendAccountDeletion({
+                username: user.name,
+                address: user.email
+            });
+        } catch (error) {
+            LOGGER.error(
+                'Sending email notification failed for %s <%s>: %s',
+                user.name,
+                user.email,
+                error.stack
+            );
+        }
+    }
 }

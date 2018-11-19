@@ -205,7 +205,6 @@ module.exports = {
         require('./account').init(app, globalMessageBus, emailConfig, emailController);
         require('./routes/account/delete-account')(
             app,
-            req => module.exports.authorize(req),
             csrf.verify,
             require('../database/channels'),
             require('../database/accounts'),
